@@ -1,0 +1,24 @@
+name: flutter_med_sales
+description: App offline de inventario y ventas para medicamentos con SQLite y PDF.
+publish_to: "none"
+
+environment:
+  sdk: ">=3.3.0 <4.0.0"
+
+dependencies:
+  flutter:
+    sdk: flutter
+  sqflite: any
+  path: any
+  path_provider: any
+  intl: any
+  pdf: any
+  printing: any
+  share_plus: any
+
+dev_dependencies:
+  flutter_test:
+    sdk: flutter
+
+flutter:
+  uses-material-design: true

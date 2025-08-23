@@ -34,7 +34,6 @@ Una aplicación Flutter completa para la gestión de inventarios médicos, venta
 
 ### 🔧 Funcionalidades Técnicas
 - ✅ Almacenamiento offline con SQLite
-- ✅ Generación de PDFs
 - ✅ Backup y restauración de datos
 - ✅ Funciona completamente sin internet
 

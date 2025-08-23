@@ -1,0 +1,91 @@
+name: Build and Release iOS App
+
+on:
+  release:
+    types: [published]
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 'Version number'
+        required: true
+        default: '1.0.0'
+
+jobs:
+  build-and-release-ios:
+    runs-on: macos-latest
+    
+    steps:
+    - name: Checkout repository
+      uses: actions/checkout@v4
+      
+    - name: Setup Flutter
+      uses: subosito/flutter-action@v2
+      with:
+        flutter-version: '3.24.0'
+        channel: 'stable'
+        
+    - name: Install dependencies
+      run: flutter pub get
+      
+    - name: Run tests
+      run: flutter test
+      
+    # Para usar certificados de Apple, necesitarás configurar secrets:
+    # IOS_CERTIFICATE_BASE64: Certificado de distribución en base64
+    # IOS_CERTIFICATE_PASSWORD: Contraseña del certificado
+    # IOS_PROVISIONING_PROFILE_BASE64: Perfil de aprovisionamiento en base64
+    # APPLE_ID: Tu Apple ID
+    # APPLE_PASSWORD: Contraseña específica de la app
+    # APPLE_TEAM_ID: ID del equipo de desarrollador
+    
+    - name: Import Code-Signing Certificates
+      if: env.IOS_CERTIFICATE_BASE64 != ''
+      uses: Apple-Actions/import-codesign-certs@v1
+      with:
+        p12-file-base64: ${{ secrets.IOS_CERTIFICATE_BASE64 }}
+        p12-password: ${{ secrets.IOS_CERTIFICATE_PASSWORD }}
+        
+    - name: Install Provisioning Profile
+      if: env.IOS_PROVISIONING_PROFILE_BASE64 != ''
+      uses: Apple-Actions/download-provisioning-profiles@v1
+      with:
+        bundle-id: 'com.pinguina.medsales'
+        profile-type: 'IOS_APP_STORE'
+        issuer-id: ${{ secrets.APPLE_ISSUER_ID }}
+        api-key-id: ${{ secrets.APPLE_API_KEY_ID }}
+        api-private-key: ${{ secrets.APPLE_API_PRIVATE_KEY }}
+        
+    - name: Build iOS for Release
+      run: |
+        flutter build ios --release
+        
+    - name: Build IPA
+      run: |
+        xcodebuild -workspace ios/Runner.xcworkspace \
+          -scheme Runner \
+          -configuration Release \
+          -destination generic/platform=iOS \
+          -archivePath build/ios/Runner.xcarchive \
+          archive
+          
+        xcodebuild -exportArchive \
+          -archivePath build/ios/Runner.xcarchive \
+          -exportPath build/ios/ipa \
+          -exportOptionsPlist ios/ExportOptions.plist
+          
+    - name: Upload to App Store Connect
+      if: env.APPLE_ID != ''
+      run: |
+        xcrun altool --upload-app \
+          --type ios \
+          --file build/ios/ipa/Runner.ipa \
+          --username ${{ secrets.APPLE_ID }} \
+          --password ${{ secrets.APPLE_PASSWORD }} \
+          --asc-provider ${{ secrets.APPLE_TEAM_ID }}
+          
+    - name: Upload IPA artifact
+      uses: actions/upload-artifact@v4
+      with:
+        name: ios-app-release
+        path: build/ios/ipa/Runner.ipa
+        retention-days: 90

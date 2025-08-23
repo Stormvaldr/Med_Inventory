@@ -3,22 +3,25 @@ class Sale {
   final int? id;
   final String fecha; // ISO string
   final double total;
-  final double envio;
+  final String nombreCliente;
+  final bool esMayorista;
 
-  Sale({this.id, required this.fecha, required this.total, required this.envio});
+  Sale({this.id, required this.fecha, required this.total, required this.nombreCliente, this.esMayorista = false});
 
   Map<String, dynamic> toMap() => {
         'id': id,
         'fecha': fecha,
         'total': total,
-        'envio': envio,
+        'nombre_cliente': nombreCliente,
+        'es_mayorista': esMayorista ? 1 : 0,
       };
 
   static Sale fromMap(Map<String, dynamic> m) => Sale(
         id: m['id'] as int?,
         fecha: m['fecha'] as String,
         total: (m['total'] as num).toDouble(),
-        envio: (m['envio'] as num).toDouble(),
+        nombreCliente: m['nombre_cliente'] as String,
+        esMayorista: (m['es_mayorista'] as int?) == 1,
       );
 }
 

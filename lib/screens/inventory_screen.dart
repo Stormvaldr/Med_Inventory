@@ -33,7 +33,8 @@ class _InventoryScreenState extends State<InventoryScreen> {
   Future<void> _upsertDrug([Drug? drug]) async {
     final nombreCtrl = TextEditingController(text: drug?.nombre);
     final costeCtrl = TextEditingController(text: drug?.precioCoste.toString() ?? '');
-    final ventaCtrl = TextEditingController(text: drug?.precioVenta.toString() ?? '');
+    final ventaMinoristaCtrl = TextEditingController(text: drug?.precioVentaMinorista.toString() ?? '');
+    final ventaMayoristaCtrl = TextEditingController(text: drug?.precioVentaMayorista.toString() ?? '');
     final cantCtrl = TextEditingController(text: drug?.cantidad.toString() ?? '');
 
     final formKey = GlobalKey<FormState>();
@@ -59,8 +60,14 @@ class _InventoryScreenState extends State<InventoryScreen> {
                   validator: (v) => (double.tryParse(v ?? '') == null) ? 'Número válido' : null,
                 ),
                 TextFormField(
-                  controller: ventaCtrl,
-                  decoration: const InputDecoration(labelText: 'Precio de venta'),
+                  controller: ventaMinoristaCtrl,
+                  decoration: const InputDecoration(labelText: 'Precio venta minorista'),
+                  keyboardType: TextInputType.number,
+                  validator: (v) => (double.tryParse(v ?? '') == null) ? 'Número válido' : null,
+                ),
+                TextFormField(
+                  controller: ventaMayoristaCtrl,
+                  decoration: const InputDecoration(labelText: 'Precio venta mayorista'),
                   keyboardType: TextInputType.number,
                   validator: (v) => (double.tryParse(v ?? '') == null) ? 'Número válido' : null,
                 ),
@@ -89,7 +96,8 @@ class _InventoryScreenState extends State<InventoryScreen> {
       id: drug?.id,
       nombre: nombreCtrl.text.trim(),
       precioCoste: double.parse(costeCtrl.text),
-      precioVenta: double.parse(ventaCtrl.text),
+      precioVentaMinorista: double.parse(ventaMinoristaCtrl.text),
+      precioVentaMayorista: double.parse(ventaMayoristaCtrl.text),
       cantidad: int.parse(cantCtrl.text),
     ).toMap();
 
@@ -137,7 +145,7 @@ class _InventoryScreenState extends State<InventoryScreen> {
                 final d = items[i];
                 return ListTile(
                   title: Text(d.nombre),
-                  subtitle: Text('Coste: ${d.precioCoste.toStringAsFixed(2)} • Venta: ${d.precioVenta.toStringAsFixed(2)} • Stock: ${d.cantidad}'),
+                  subtitle: Text('Coste: ${d.precioCoste.toStringAsFixed(2)} • Minorista: ${d.precioVentaMinorista.toStringAsFixed(2)} • Mayorista: ${d.precioVentaMayorista.toStringAsFixed(2)} • Stock: ${d.cantidad}'),
                   trailing: PopupMenuButton<String>(
                     onSelected: (val) {
                       if (val == 'edit') _upsertDrug(d);

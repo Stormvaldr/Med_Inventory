@@ -16,7 +16,8 @@ class SalesScreen extends StatefulWidget {
 class _SalesScreenState extends State<SalesScreen> {
   List<Drug> inventory = [];
   final Map<int, int> cart = {}; // medicamentoId -> cantidad
-  double envio = 0.0;
+  final TextEditingController _clienteController = TextEditingController();
+  bool esMayorista = false; // false = minorista, true = mayorista
 
   @override
   void initState() {
@@ -32,11 +33,12 @@ class _SalesScreenState extends State<SalesScreen> {
     });
   }
 
-  double get subtotal {
+  double get total {
     double s = 0;
     for (final entry in cart.entries) {
       final drug = inventory.firstWhere((d) => d.id == entry.key);
-      s += drug.precioVenta * entry.value;
+      final precio = esMayorista ? drug.precioVentaMayorista : drug.precioVentaMinorista;
+      s += precio * entry.value;
     }
     return s;
   }
@@ -46,45 +48,59 @@ class _SalesScreenState extends State<SalesScreen> {
       ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Añade productos al carrito.')));
       return;
     }
+    if (_clienteController.text.trim().isEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Ingresa el nombre del cliente.')));
+      return;
+    }
+    
     final db = await DatabaseHelper.instance.database;
     await db.transaction((txn) async {
       final fecha = DateTime.now().toIso8601String();
-      final total = subtotal + envio;
-      final ventaId = await txn.insert('ventas', {'fecha': fecha, 'total': total, 'envio': envio});
+      final totalVenta = total;
+      final nombreCliente = _clienteController.text.trim();
+      final ventaId = await txn.insert('ventas', {
+        'fecha': fecha, 
+        'total': totalVenta, 
+        'nombre_cliente': nombreCliente,
+        'es_mayorista': esMayorista ? 1 : 0
+      });
 
       // Insert items y rebajar stock
       for (final entry in cart.entries) {
         final drug = inventory.firstWhere((d) => d.id == entry.key);
+        final precioUnitario = esMayorista ? drug.precioVentaMayorista : drug.precioVentaMinorista;
         await txn.insert('detalle_ventas', {
           'venta_id': ventaId,
           'medicamento_id': drug.id,
           'cantidad': entry.value,
-          'precio_unitario': drug.precioVenta,
+          'precio_unitario': precioUnitario,
         });
         final nuevoStock = drug.cantidad - entry.value;
         await txn.update('medicamentos', {'cantidad': nuevoStock}, where: 'id = ?', whereArgs: [drug.id]);
       }
 
-      // Generar PDF
-      await PdfGenerator.generateAndShareReceipt(
+      // Guardar informe de venta (sin compartir PDF)
+      await PdfGenerator.saveReceiptReport(
         ventaId: ventaId,
         fecha: fecha,
+        nombreCliente: nombreCliente,
         items: cart.entries.map((e) {
           final drug = inventory.firstWhere((d) => d.id == e.key);
-          return ReceiptItem(nombre: drug.nombre, cantidad: e.value, precioUnitario: drug.precioVenta);
+          final precioUnitario = esMayorista ? drug.precioVentaMayorista : drug.precioVentaMinorista;
+          return ReceiptItem(nombre: drug.nombre, cantidad: e.value, precioUnitario: precioUnitario);
         }).toList(),
-        envio: envio,
-        total: total,
+        total: totalVenta,
       );
     });
 
     setState(() {
       cart.clear();
-      envio = 0.0;
+      _clienteController.clear();
+      esMayorista = false;
     });
     await _loadInventory();
     if (mounted) {
-      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Venta registrada y recibo generado.')));
+      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Venta registrada e informe guardado.')));
     }
   }
 
@@ -94,24 +110,59 @@ class _SalesScreenState extends State<SalesScreen> {
       children: [
         Padding(
           padding: const EdgeInsets.all(12),
-          child: Row(
+          child: Column(
             children: [
-              Expanded(
-                child: TextFormField(
-                  decoration: const InputDecoration(
-                    labelText: 'Costo de envío (manual)',
-                    prefixText: '\$ ',
-                    border: OutlineInputBorder(),
+              Row(
+                children: [
+                  Expanded(
+                    child: TextFormField(
+                      controller: _clienteController,
+                      decoration: const InputDecoration(
+                        labelText: 'Nombre del cliente',
+                        prefixIcon: Icon(Icons.person),
+                        border: OutlineInputBorder(),
+                      ),
+                      textCapitalization: TextCapitalization.words,
+                    ),
                   ),
-                  keyboardType: TextInputType.number,
-                  onChanged: (v) => setState(() => envio = double.tryParse(v) ?? 0),
-                ),
+                  const SizedBox(width: 12),
+                  FilledButton.icon(
+                    onPressed: _confirmSale,
+                    icon: const Icon(Icons.save),
+                    label: const Text('Confirmar Venta'),
+                  ),
+                ],
               ),
-              const SizedBox(width: 12),
-              FilledButton.icon(
-                onPressed: _confirmSale,
-                icon: const Icon(Icons.receipt_long),
-                label: const Text('Confirmar y PDF'),
+              const SizedBox(height: 12),
+              Row(
+                children: [
+                  const Icon(Icons.business, color: Colors.grey),
+                  const SizedBox(width: 8),
+                  const Text('Tipo de cliente:', style: TextStyle(fontWeight: FontWeight.w500)),
+                  const SizedBox(width: 16),
+                  Expanded(
+                    child: SegmentedButton<bool>(
+                      segments: const [
+                        ButtonSegment<bool>(
+                          value: false,
+                          label: Text('Minorista'),
+                          icon: Icon(Icons.person),
+                        ),
+                        ButtonSegment<bool>(
+                          value: true,
+                          label: Text('Mayorista'),
+                          icon: Icon(Icons.business),
+                        ),
+                      ],
+                      selected: {esMayorista},
+                      onSelectionChanged: (Set<bool> selection) {
+                        setState(() {
+                          esMayorista = selection.first;
+                        });
+                      },
+                    ),
+                  ),
+                ],
               ),
             ],
           ),
@@ -126,20 +177,46 @@ class _SalesScreenState extends State<SalesScreen> {
               final q = cart[d.id] ?? 0;
               return ListTile(
                 title: Text(d.nombre),
-                subtitle: Text('Precio: ${d.precioVenta.toStringAsFixed(2)} • Stock: ${d.cantidad}'),
-                trailing: Row(
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
-                    IconButton(
-                      icon: const Icon(Icons.remove_circle_outline),
-                      onPressed: q > 0 ? () => setState(() => cart[d.id!] = q - 1 == 0 ? 0 : q - 1) : null,
-                    ),
-                    Text('$q'),
-                    IconButton(
-                      icon: const Icon(Icons.add_circle_outline),
-                      onPressed: d.cantidad > q ? () => setState(() => cart[d.id!] = q + 1) : null,
-                    ),
-                  ],
+                subtitle: Text('Precio: \$${(esMayorista ? d.precioVentaMayorista : d.precioVentaMinorista).toStringAsFixed(2)} • Stock: ${d.cantidad}'),
+                trailing: SizedBox(
+                  width: 160,
+                  child: Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      IconButton(
+                        icon: const Icon(Icons.remove_circle_outline),
+                        onPressed: q > 0 ? () => setState(() => cart[d.id!] = q - 1 == 0 ? 0 : q - 1) : null,
+                      ),
+                      SizedBox(
+                        width: 50,
+                        child: TextFormField(
+                          initialValue: q.toString(),
+                          textAlign: TextAlign.center,
+                          keyboardType: TextInputType.number,
+                          decoration: const InputDecoration(
+                            border: OutlineInputBorder(),
+                            contentPadding: EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                          ),
+                          onChanged: (value) {
+                            final newQ = int.tryParse(value) ?? 0;
+                            if (newQ >= 0 && newQ <= d.cantidad) {
+                              setState(() {
+                                if (newQ == 0) {
+                                  cart.remove(d.id!);
+                                } else {
+                                  cart[d.id!] = newQ;
+                                }
+                              });
+                            }
+                          },
+                        ),
+                      ),
+                      IconButton(
+                        icon: const Icon(Icons.add_circle_outline),
+                        onPressed: d.cantidad > q ? () => setState(() => cart[d.id!] = q + 1) : null,
+                      ),
+                    ],
+                  ),
                 ),
               );
             },
@@ -147,11 +224,24 @@ class _SalesScreenState extends State<SalesScreen> {
         ),
         Container(
           padding: const EdgeInsets.all(16),
+          decoration: BoxDecoration(
+            color: Theme.of(context).colorScheme.surfaceVariant,
+            border: Border(top: BorderSide(color: Theme.of(context).dividerColor)),
+          ),
           child: Row(
             mainAxisAlignment: MainAxisAlignment.spaceBetween,
             children: [
-              Text('Subtotal: \$${subtotal.toStringAsFixed(2)}'),
-              Text('Total: \$${(subtotal + envio).toStringAsFixed(2)}'),
+              Text(
+                'Items en carrito: ${cart.values.fold(0, (sum, qty) => sum + qty)}',
+                style: Theme.of(context).textTheme.titleMedium,
+              ),
+              Text(
+                'Total: \$${total.toStringAsFixed(2)}',
+                style: Theme.of(context).textTheme.titleLarge?.copyWith(
+                  fontWeight: FontWeight.bold,
+                  color: Theme.of(context).colorScheme.primary,
+                ),
+              ),
             ],
           ),
         ),

@@ -1,5 +1,6 @@
-name: flutter_med_sales
-description: App offline de inventario y ventas para medicamentos con SQLite y PDF.
+name: pinguimed
+description: PinguiMed - App offline de inventario y ventas para medicamentos con SQLite y PDF.
+version: 2.2.5+9
 publish_to: "none"
 
 environment:
@@ -15,10 +16,34 @@ dependencies:
   pdf: any
   printing: any
   share_plus: any
+  provider: ^6.1.1
+  shared_preferences: ^2.2.2
 
 dev_dependencies:
   flutter_test:
     sdk: flutter
+  flutter_launcher_icons: ^0.13.1
 
 flutter:
   uses-material-design: true
+  
+  assets:
+    - assets/icons/
+
+flutter_launcher_icons:
+  android: "launcher_icon"
+  ios: true
+  image_path: "assets/icons/app_icon.png"
+  min_sdk_android: 21 # android min sdk min:16, default 21
+  web:
+    generate: true
+    image_path: "assets/icons/app_icon.png"
+    background_color: "#F8BBD9"
+    theme_color: "#B39DDB"
+  windows:
+    generate: true
+    image_path: "assets/icons/app_icon.png"
+    icon_size: 48 # min:48, max:256, default: 48
+  
+  # Configuración del icono de la aplicación
+  # Para generar iconos: flutter pub get && flutter pub run flutter_launcher_icons:main

@@ -1,9 +1,12 @@
 
 import 'package:flutter/material.dart';
+import 'package:provider/provider.dart';
 import 'package:intl/intl.dart';
-import '../data/database_helper.dart';
+import '../data/database_factory.dart';
+import '../models/drug.dart';
+import '../utils/currency_formatter.dart';
+import '../utils/bubble_notification.dart';
 import 'client_history_screen.dart';
-
 
 class ReportsScreen extends StatefulWidget {
   const ReportsScreen({super.key});
@@ -27,67 +30,86 @@ class _ReportsScreenState extends State<ReportsScreen> {
 
   Future<void> _load() async {
     try {
-      final db = await DatabaseHelper.instance.database;
+      final sales = await DatabaseFactory.instance.getSales();
+      final drugs = await DatabaseFactory.instance.getDrugs();
       final now = DateTime.now();
-      final dayStart = DateTime(now.year, now.month, now.day).toIso8601String();
-      final nextDay = DateTime(now.year, now.month, now.day + 1).toIso8601String();
-      final monthStart = DateTime(now.year, now.month, 1).toIso8601String();
-      final nextMonth = DateTime(now.year, now.month + 1, 1).toIso8601String();
+      final dayStart = DateTime(now.year, now.month, now.day);
+      final monthStart = DateTime(now.year, now.month, 1);
 
-      // Verificar si hay ventas
-      final ventasCount = await db.rawQuery('SELECT COUNT(*) as count FROM ventas');
-      print('Total ventas en BD: ${ventasCount.first['count']}');
+      print('Total ventas en BD: ${sales.length}');
 
-      // Ingresos (sum de total)
-      final d = await db.rawQuery(
-        'SELECT SUM(total) as s FROM ventas WHERE fecha >= ? AND fecha < ?',
-        [dayStart, nextDay],
-      );
-      final m = await db.rawQuery(
-        'SELECT SUM(total) as s FROM ventas WHERE fecha >= ? AND fecha < ?',
-        [monthStart, nextMonth],
-      );
-      ingresosDia = (d.first['s'] as double?) ?? 0;
-      ingresosMes = (m.first['s'] as double?) ?? 0;
+      // Filter sales by date
+      final todaySales = sales.where((sale) {
+        final saleDate = DateTime.parse(sale.fecha);
+        return saleDate.year == dayStart.year && 
+               saleDate.month == dayStart.month && 
+               saleDate.day == dayStart.day;
+      }).toList();
+      
+      final monthSales = sales.where((sale) {
+        final saleDate = DateTime.parse(sale.fecha);
+        return saleDate.year == monthStart.year && 
+               saleDate.month == monthStart.month;
+      }).toList();
+
+      // Calculate income
+      ingresosDia = todaySales.fold(0.0, (sum, sale) => sum + sale.total);
+      ingresosMes = monthSales.fold(0.0, (sum, sale) => sum + sale.total);
 
       print('Ingresos día: $ingresosDia, mes: $ingresosMes');
 
-      // Utilidad (diferencia entre precio venta y coste)
-      final ud = await db.rawQuery('''
-        SELECT SUM((dv.precio_unitario - m.precio_coste) * dv.cantidad) as utilidad
-        FROM detalle_ventas dv
-        JOIN ventas v ON dv.venta_id = v.id
-        JOIN medicamentos m ON dv.medicamento_id = m.id
-        WHERE v.fecha >= ? AND v.fecha < ?
-      ''', [dayStart, nextDay]);
+      // Calculate profit (difference between sale price and cost)
+      utilidadDia = 0.0;
+      utilidadMes = 0.0;
       
-      final um = await db.rawQuery('''
-        SELECT SUM((dv.precio_unitario - m.precio_coste) * dv.cantidad) as utilidad
-        FROM detalle_ventas dv
-        JOIN ventas v ON dv.venta_id = v.id
-        JOIN medicamentos m ON dv.medicamento_id = m.id
-        WHERE v.fecha >= ? AND v.fecha < ?
-      ''', [monthStart, nextMonth]);
+      for (final sale in todaySales) {
+        final items = await DatabaseFactory.instance.getSaleItems(sale.id!);
+        for (final item in items) {
+          final drug = drugs.firstWhere((d) => d.id == item.medicamentoId, orElse: () => Drug(id: 0, nombre: '', precioCoste: 0, precioVentaMinorista: 0, precioVentaMayorista: 0, cantidad: 0));
+          if (drug.id != 0) {
+            utilidadDia += (item.precioUnitario - drug.precioCoste) * item.cantidad;
+          }
+        }
+      }
       
-      utilidadDia = (ud.first['utilidad'] as double?) ?? 0;
-      utilidadMes = (um.first['utilidad'] as double?) ?? 0;
+      for (final sale in monthSales) {
+        final items = await DatabaseFactory.instance.getSaleItems(sale.id!);
+        for (final item in items) {
+          final drug = drugs.firstWhere((d) => d.id == item.medicamentoId, orElse: () => Drug(id: 0, nombre: '', precioCoste: 0, precioVentaMinorista: 0, precioVentaMayorista: 0, cantidad: 0));
+          if (drug.id != 0) {
+            utilidadMes += (item.precioUnitario - drug.precioCoste) * item.cantidad;
+          }
+        }
+      }
 
       print('Utilidad día: $utilidadDia, mes: $utilidadMes');
 
-      // Cargar lista de clientes con estadísticas
-      final clientsResult = await db.rawQuery('''
-        SELECT 
-          nombre_cliente,
-          COUNT(*) as total_compras,
-          SUM(total) as total_gastado,
-          MAX(fecha) as ultima_compra
-        FROM ventas 
-        WHERE nombre_cliente IS NOT NULL AND nombre_cliente != ''
-        GROUP BY nombre_cliente
-        ORDER BY total_gastado DESC
-      ''');
+      // Build client statistics
+      final Map<String, Map<String, dynamic>> clientStats = {};
+      for (final sale in sales) {
+        if (sale.nombreCliente.isNotEmpty) {
+          if (!clientStats.containsKey(sale.nombreCliente)) {
+            clientStats[sale.nombreCliente] = {
+              'nombre_cliente': sale.nombreCliente,
+              'total_compras': 0,
+              'total_gastado': 0.0,
+              'ultima_compra': sale.fecha,
+            };
+          }
+          clientStats[sale.nombreCliente]!['total_compras'] += 1;
+          clientStats[sale.nombreCliente]!['total_gastado'] += sale.total;
+          
+          // Update last purchase if this sale is more recent
+          final currentLast = DateTime.parse(clientStats[sale.nombreCliente]!['ultima_compra']);
+          final saleDate = DateTime.parse(sale.fecha);
+          if (saleDate.isAfter(currentLast)) {
+            clientStats[sale.nombreCliente]!['ultima_compra'] = sale.fecha;
+          }
+        }
+      }
       
-      clients = clientsResult;
+      clients = clientStats.values.toList()
+        ..sort((a, b) => (b['total_gastado'] as double).compareTo(a['total_gastado'] as double));
       print('Clientes encontrados: ${clients.length}');
 
       if (mounted) {
@@ -96,27 +118,26 @@ class _ReportsScreenState extends State<ReportsScreen> {
     } catch (e) {
       print('Error cargando reportes: $e');
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Error cargando datos: $e')),
-        );
+        context.showErrorBubble('Error cargando datos: $e');
       }
     }
   }
 
   @override
   Widget build(BuildContext context) {
-    final f = NumberFormat.currency(symbol: '\$');
     final dateFormat = DateFormat('dd/MM/yyyy');
     final theme = Theme.of(context);
+    final screenWidth = MediaQuery.of(context).size.width;
+    final isSmallScreen = CurrencyFormatter.isSmallScreen(screenWidth);
     
     return Scaffold(
-      backgroundColor: theme.colorScheme.background,
+      backgroundColor: theme.colorScheme.surface,
       body: RefreshIndicator(
         onRefresh: _load,
         child: ListView(
           padding: const EdgeInsets.all(16),
           children: [
-            // Sección de ganancias mejorada
+            // Sección de clientes
             Card(
               elevation: 4,
               shape: RoundedRectangleBorder(
@@ -129,10 +150,10 @@ class _ReportsScreenState extends State<ReportsScreen> {
                   children: [
                     Row(
                       children: [
-                        Icon(Icons.trending_up, color: theme.colorScheme.primary, size: 24),
+                        Icon(Icons.people, color: theme.colorScheme.primary, size: 24),
                         const SizedBox(width: 8),
                         Text(
-                          'Resumen de Ganancias',
+                          'Historial de Clientes',
                           style: TextStyle(
                             fontSize: 20,
                             fontWeight: FontWeight.bold,
@@ -141,191 +162,36 @@ class _ReportsScreenState extends State<ReportsScreen> {
                         ),
                       ],
                     ),
-                    const SizedBox(height: 20),
-                    
-                    // Tabla de ganancias estilo similar a clientes
-                    Container(
-                      decoration: BoxDecoration(
-                        border: Border.all(color: theme.colorScheme.outline.withOpacity(0.3)),
-                        borderRadius: BorderRadius.circular(12),
-                      ),
-                      child: Table(
-                        border: TableBorder.symmetric(
-                          inside: BorderSide(color: theme.colorScheme.outline.withOpacity(0.2)),
-                        ),
-                        columnWidths: const {
-                          0: FlexColumnWidth(2),
-                          1: FlexColumnWidth(1.5),
-                          2: FlexColumnWidth(1.5),
-                        },
-                        children: [
-                          TableRow(
-                            decoration: BoxDecoration(
-                              color: theme.colorScheme.primaryContainer.withOpacity(0.3),
-                              borderRadius: const BorderRadius.only(
-                                topLeft: Radius.circular(12),
-                                topRight: Radius.circular(12),
-                              ),
-                            ),
-                            children: [
-                              Padding(
-                                padding: const EdgeInsets.all(16),
-                                child: Text(
-                                  'Período',
-                                  style: TextStyle(
-                                    fontWeight: FontWeight.bold,
-                                    color: theme.colorScheme.onPrimaryContainer,
-                                  ),
-                                ),
-                              ),
-                              Padding(
-                                padding: const EdgeInsets.all(16),
-                                child: Text(
-                                  'Ingresos',
-                                  style: TextStyle(
-                                    fontWeight: FontWeight.bold,
-                                    color: theme.colorScheme.onPrimaryContainer,
-                                  ),
-                                ),
-                              ),
-                              Padding(
-                                padding: const EdgeInsets.all(16),
-                                child: Text(
-                                  'Utilidad',
-                                  style: TextStyle(
-                                    fontWeight: FontWeight.bold,
-                                    color: theme.colorScheme.onPrimaryContainer,
-                                  ),
-                                ),
-                              ),
-                            ],
-                          ),
-                          TableRow(
-                            children: [
-                              Padding(
-                                padding: const EdgeInsets.all(16),
-                                child: Row(
-                                  children: [
-                                    Icon(Icons.today, size: 16, color: theme.colorScheme.primary),
-                                    const SizedBox(width: 8),
-                                    const Text(
-                                      'HOY',
-                                      style: TextStyle(fontWeight: FontWeight.w600),
-                                    ),
-                                  ],
-                                ),
-                              ),
-                              Padding(
-                                padding: const EdgeInsets.all(16),
-                                child: Text(
-                                  f.format(ingresosDia),
-                                  style: TextStyle(
-                                    fontSize: 16,
-                                    fontWeight: FontWeight.w600,
-                                    color: theme.colorScheme.secondary,
-                                  ),
-                                ),
-                              ),
-                              Padding(
-                                padding: const EdgeInsets.all(16),
-                                child: Text(
-                                  f.format(utilidadDia),
-                                  style: TextStyle(
-                                    fontSize: 16,
-                                    fontWeight: FontWeight.w600,
-                                    color: theme.colorScheme.tertiary,
-                                  ),
-                                ),
-                              ),
-                            ],
-                          ),
-                          TableRow(
-                            children: [
-                              Padding(
-                                padding: const EdgeInsets.all(16),
-                                child: Row(
-                                  children: [
-                                    Icon(Icons.calendar_month, size: 16, color: theme.colorScheme.primary),
-                                    const SizedBox(width: 8),
-                                    const Text(
-                                      'ESTE MES',
-                                      style: TextStyle(fontWeight: FontWeight.w600),
-                                    ),
-                                  ],
-                                ),
-                              ),
-                              Padding(
-                                padding: const EdgeInsets.all(16),
-                                child: Text(
-                                  f.format(ingresosMes),
-                                  style: TextStyle(
-                                    fontSize: 16,
-                                    fontWeight: FontWeight.w600,
-                                    color: theme.colorScheme.secondary,
-                                  ),
-                                ),
-                              ),
-                              Padding(
-                                padding: const EdgeInsets.all(16),
-                                child: Text(
-                                  f.format(utilidadMes),
-                                  style: TextStyle(
-                                    fontSize: 16,
-                                    fontWeight: FontWeight.w600,
-                                    color: theme.colorScheme.tertiary,
-                                  ),
-                                ),
-                              ),
-                            ],
-                          ),
-                        ],
-                      ),
-                    ),
-                  ],
-                ),
-              ),
-            ),
-            const SizedBox(height: 16),
-            
-            // Sección de clientes
-            Card(
-              child: Padding(
-                padding: const EdgeInsets.all(16),
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Row(
-                      children: [
-                        const Icon(Icons.people, color: Colors.blue),
-                        const SizedBox(width: 8),
-                        const Text(
-                          'Historial de Clientes',
-                          style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
-                        ),
-                      ],
-                    ),
                     const SizedBox(height: 12),
                     if (clients.isEmpty)
-                      const Padding(
-                        padding: EdgeInsets.all(20),
+                      Padding(
+                        padding: const EdgeInsets.all(20),
                         child: Center(
                           child: Text(
                             'No hay clientes registrados',
-                            style: TextStyle(fontSize: 16, color: Colors.grey),
+                            style: TextStyle(
+                              fontSize: 16,
+                              color: theme.colorScheme.onSurface.withOpacity(0.6),
+                            ),
                           ),
                         ),
                       )
                     else
                       Container(
                         decoration: BoxDecoration(
-                          border: Border.all(color: Colors.grey[300]!),
-                          borderRadius: BorderRadius.circular(8),
+                          border: Border.all(color: theme.colorScheme.outline.withOpacity(0.3)),
+                          borderRadius: BorderRadius.circular(12),
                         ),
                         child: Table(
                           border: TableBorder.symmetric(
-                            inside: BorderSide(color: Colors.grey[300]!),
+                            inside: BorderSide(color: theme.colorScheme.outline.withOpacity(0.2)),
                           ),
-                          columnWidths: const {
+                          columnWidths: isSmallScreen ? const {
+                            0: FlexColumnWidth(3),
+                            1: FlexColumnWidth(1),
+                            2: FlexColumnWidth(2),
+                            3: FlexColumnWidth(2),
+                          } : const {
                             0: FlexColumnWidth(2.5),
                             1: FlexColumnWidth(1),
                             2: FlexColumnWidth(1.5),
@@ -334,28 +200,56 @@ class _ReportsScreenState extends State<ReportsScreen> {
                           children: [
                             TableRow(
                               decoration: BoxDecoration(
-                                color: Colors.grey[100],
+                                color: theme.colorScheme.primaryContainer.withOpacity(0.3),
                                 borderRadius: const BorderRadius.only(
-                                  topLeft: Radius.circular(8),
-                                  topRight: Radius.circular(8),
+                                  topLeft: Radius.circular(12),
+                                  topRight: Radius.circular(12),
                                 ),
                               ),
-                              children: const [
+                              children: [
                                 Padding(
-                                  padding: EdgeInsets.all(12),
-                                  child: Text('Cliente', style: TextStyle(fontWeight: FontWeight.bold)),
+                                  padding: EdgeInsets.all(isSmallScreen ? 8 : 12),
+                                  child: Text(
+                                    'Cliente',
+                                    style: TextStyle(
+                                      fontWeight: FontWeight.bold,
+                                      fontSize: isSmallScreen ? 12 : 14,
+                                      color: theme.colorScheme.onPrimaryContainer,
+                                    ),
+                                  ),
                                 ),
                                 Padding(
-                                  padding: EdgeInsets.all(12),
-                                  child: Text('Compras', style: TextStyle(fontWeight: FontWeight.bold)),
+                                  padding: EdgeInsets.all(isSmallScreen ? 8 : 12),
+                                  child: Text(
+                                    'Compras',
+                                    style: TextStyle(
+                                      fontWeight: FontWeight.bold,
+                                      fontSize: isSmallScreen ? 12 : 14,
+                                      color: theme.colorScheme.onPrimaryContainer,
+                                    ),
+                                  ),
                                 ),
                                 Padding(
-                                  padding: EdgeInsets.all(12),
-                                  child: Text('Total Gastado', style: TextStyle(fontWeight: FontWeight.bold)),
+                                  padding: EdgeInsets.all(isSmallScreen ? 8 : 12),
+                                  child: Text(
+                                    isSmallScreen ? 'Total' : 'Total Gastado',
+                                    style: TextStyle(
+                                      fontWeight: FontWeight.bold,
+                                      fontSize: isSmallScreen ? 12 : 14,
+                                      color: theme.colorScheme.onPrimaryContainer,
+                                    ),
+                                  ),
                                 ),
                                 Padding(
-                                  padding: EdgeInsets.all(12),
-                                  child: Text('Última Compra', style: TextStyle(fontWeight: FontWeight.bold)),
+                                  padding: EdgeInsets.all(isSmallScreen ? 8 : 12),
+                                  child: Text(
+                                    isSmallScreen ? 'Última' : 'Última Compra',
+                                    style: TextStyle(
+                                      fontWeight: FontWeight.bold,
+                                      fontSize: isSmallScreen ? 12 : 14,
+                                      color: theme.colorScheme.onPrimaryContainer,
+                                    ),
+                                  ),
                                 ),
                               ],
                             ),
@@ -373,29 +267,46 @@ class _ReportsScreenState extends State<ReportsScreen> {
                                     );
                                   },
                                   child: Padding(
-                                    padding: const EdgeInsets.all(12),
+                                    padding: EdgeInsets.all(isSmallScreen ? 8 : 12),
                                     child: Text(
                                       client['nombre_cliente'],
-                                      style: const TextStyle(
-                                        color: Colors.blue,
+                                      style: TextStyle(
+                                        color: theme.colorScheme.primary,
                                         decoration: TextDecoration.underline,
+                                        fontSize: isSmallScreen ? 12 : 14,
                                       ),
                                     ),
                                   ),
                                 ),
                                 Padding(
-                                  padding: const EdgeInsets.all(12),
-                                  child: Text('${client['total_compras']}'),
+                                  padding: EdgeInsets.all(isSmallScreen ? 8 : 12),
+                                  child: Text(
+                                    CurrencyFormatter.formatPurchaseCount(client['total_compras']),
+                                    style: TextStyle(
+                                      color: theme.colorScheme.onSurface,
+                                      fontSize: isSmallScreen ? 12 : 14,
+                                    ),
+                                  ),
                                 ),
                                 Padding(
-                                  padding: const EdgeInsets.all(12),
-                                  child: Text(f.format(client['total_gastado'])),
+                                  padding: EdgeInsets.all(isSmallScreen ? 8 : 12),
+                                  child: Text(
+                                    CurrencyFormatter.formatForTable(client['total_gastado'], isSmallScreen),
+                                    style: TextStyle(
+                                      color: theme.colorScheme.onSurface,
+                                      fontSize: isSmallScreen ? 12 : 14,
+                                      fontWeight: FontWeight.w600,
+                                    ),
+                                  ),
                                 ),
                                 Padding(
-                                  padding: const EdgeInsets.all(12),
+                                  padding: EdgeInsets.all(isSmallScreen ? 8 : 12),
                                   child: Text(
                                     dateFormat.format(DateTime.parse(client['ultima_compra'])),
-                                    style: const TextStyle(fontSize: 12),
+                                    style: TextStyle(
+                                      fontSize: isSmallScreen ? 10 : 12,
+                                      color: theme.colorScheme.onSurface.withOpacity(0.7),
+                                    ),
                                   ),
                                 ),
                               ],
@@ -408,10 +319,13 @@ class _ReportsScreenState extends State<ReportsScreen> {
               ),
             ),
             const SizedBox(height: 12),
-            const Text(
+            Text(
               'Desliza hacia abajo para actualizar. Toca el nombre de un cliente para ver su historial.',
               textAlign: TextAlign.center,
-              style: TextStyle(color: Colors.grey),
+              style: TextStyle(
+                color: theme.colorScheme.onSurface.withOpacity(0.6),
+                fontSize: isSmallScreen ? 12 : 14,
+              ),
             ),
           ],
         ),

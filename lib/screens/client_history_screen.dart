@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
-import '../data/database_helper.dart';
+import '../data/database_factory.dart';
+import '../utils/bubble_notification.dart';
 
 class ClientHistoryScreen extends StatefulWidget {
   final String clientName;
@@ -23,24 +24,27 @@ class _ClientHistoryScreenState extends State<ClientHistoryScreen> {
 
   Future<void> _loadClientHistory() async {
     try {
-      final db = await DatabaseHelper.instance.database;
+      final sales = await DatabaseFactory.instance.getSales();
       
-      // Obtener todas las ventas del cliente con detalles
-      final result = await db.rawQuery('''
-        SELECT 
-          v.id as venta_id,
-          v.fecha,
-          v.total,
-          v.es_mayorista,
-          dv.cantidad,
-          dv.precio_unitario,
-          m.nombre as medicamento_nombre
-        FROM ventas v
-        JOIN detalle_ventas dv ON v.id = dv.venta_id
-        JOIN medicamentos m ON dv.medicamento_id = m.id
-        WHERE v.nombre_cliente = ?
-        ORDER BY v.fecha DESC, v.id DESC
-      ''', [widget.clientName]);
+      // Filter sales for this client
+      final clientSales = sales.where((sale) => sale.nombreCliente == widget.clientName).toList();
+      
+      // Get sale items for each sale and build the result
+      final List<Map<String, dynamic>> result = [];
+      for (final sale in clientSales) {
+        final items = await DatabaseFactory.instance.getSaleItems(sale.id!);
+        for (final item in items) {
+          result.add({
+            'venta_id': sale.id,
+            'fecha': sale.fecha,
+            'total': sale.total,
+            'es_mayorista': sale.esMayorista ? 1 : 0,
+            'cantidad': item.cantidad,
+            'precio_unitario': item.precioUnitario,
+            'medicamento_nombre': item.nombre,
+          });
+        }
+      }
       
       setState(() {
         purchases = result;
@@ -52,9 +56,7 @@ class _ClientHistoryScreenState extends State<ClientHistoryScreen> {
         isLoading = false;
       });
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Error cargando historial: $e')),
-        );
+        context.showErrorBubble('Error cargando historial: $e');
       }
     }
   }
@@ -66,7 +68,7 @@ class _ClientHistoryScreenState extends State<ClientHistoryScreen> {
     final theme = Theme.of(context);
     
     return Scaffold(
-      backgroundColor: theme.colorScheme.background,
+      backgroundColor: theme.colorScheme.surface,
       body: SafeArea(
         child: Column(
           children: [
@@ -493,27 +495,17 @@ class _ClientHistoryScreenState extends State<ClientHistoryScreen> {
 
     if (confirmed == true) {
       try {
-        await DatabaseHelper.instance.deleteSale(ventaId);
+        await DatabaseFactory.instance.deleteSale(ventaId);
         
         // Recargar el historial del cliente
         await _loadClientHistory();
         
         if (mounted) {
-          ScaffoldMessenger.of(context).showSnackBar(
-            SnackBar(
-              content: Text('Venta #$ventaId eliminada correctamente'),
-              backgroundColor: Colors.green,
-            ),
-          );
+          context.showSuccessBubble('Venta #$ventaId eliminada correctamente');
         }
       } catch (e) {
         if (mounted) {
-          ScaffoldMessenger.of(context).showSnackBar(
-            SnackBar(
-              content: Text('Error al eliminar la venta: $e'),
-              backgroundColor: Colors.red,
-            ),
-          );
+          context.showErrorBubble('Error al eliminar la venta: $e');
         }
       }
     }

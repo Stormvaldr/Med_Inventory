@@ -6,10 +6,17 @@ import 'screens/inventory_screen.dart';
 import 'screens/sales_screen.dart';
 import 'screens/reports_screen.dart';
 import 'screens/calculator_screen.dart';
+import 'screens/investment_screen.dart';
 import 'theme/app_theme.dart';
 import 'providers/theme_provider.dart';
+import 'data/database_factory.dart';
 
-void main() {
+void main() async {
+  WidgetsFlutterBinding.ensureInitialized();
+  
+  // Inicializar la base de datos según la plataforma
+  await DatabaseFactory.initialize();
+  
   runApp(
     ChangeNotifierProvider(
       create: (context) => ThemeProvider(),
@@ -55,6 +62,7 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
     SalesScreen(),
     ReportsScreen(),
     CalculatorScreen(),
+    InvestmentScreen(),
   ];
 
   @override
@@ -83,7 +91,7 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
     final themeProvider = Provider.of<ThemeProvider>(context);
     
     return Scaffold(
-      backgroundColor: theme.colorScheme.background,
+      backgroundColor: theme.colorScheme.surface,
       body: SafeArea(
         child: Column(
           children: [
@@ -93,13 +101,41 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
               child: Row(
                 mainAxisAlignment: MainAxisAlignment.spaceBetween,
                 children: [
-                  Text(
-                    'PinguiMed',
-                    style: TextStyle(
-                      fontSize: 28,
-                      fontWeight: FontWeight.bold,
-                      color: theme.colorScheme.primary,
-                    ),
+                  Row(
+                    children: [
+                      Container(
+                        width: 40,
+                        height: 40,
+                        decoration: BoxDecoration(
+                          borderRadius: BorderRadius.circular(12),
+                          boxShadow: [
+                            BoxShadow(
+                              color: theme.colorScheme.primary.withOpacity(0.2),
+                              blurRadius: 8,
+                              offset: const Offset(0, 2),
+                            ),
+                          ],
+                        ),
+                        child: ClipRRect(
+                          borderRadius: BorderRadius.circular(12),
+                          child: Image.asset(
+                            'assets/icons/pinguimed_icon_1024.png',
+                            width: 40,
+                            height: 40,
+                            fit: BoxFit.cover,
+                          ),
+                        ),
+                      ),
+                      const SizedBox(width: 12),
+                      Text(
+                        'PinguiMed',
+                        style: TextStyle(
+                          fontSize: 28,
+                          fontWeight: FontWeight.bold,
+                          color: theme.colorScheme.primary,
+                        ),
+                      ),
+                    ],
                   ),
                   Container(
                     decoration: BoxDecoration(
@@ -196,6 +232,11 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
                   icon: Icon(Icons.calculate_outlined),
                   selectedIcon: Icon(Icons.calculate),
                   label: 'Calculadora',
+                ),
+                NavigationDestination(
+                  icon: Icon(Icons.trending_up_outlined),
+                  selectedIcon: Icon(Icons.trending_up),
+                  label: 'Inversiones',
                 ),
               ],
             ),

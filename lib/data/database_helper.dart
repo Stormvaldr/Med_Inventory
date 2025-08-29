@@ -1,9 +1,12 @@
 
-import 'package:path/path.dart';
 import 'package:sqflite/sqflite.dart';
+import 'package:path/path.dart';
+import '../models/drug.dart';
 import '../models/sale.dart';
+import '../models/finance.dart';
+import 'database_factory.dart';
 
-class DatabaseHelper {
+class DatabaseHelper implements DatabaseInterface {
   static final DatabaseHelper instance = DatabaseHelper._internal();
   DatabaseHelper._internal();
 
@@ -20,7 +23,7 @@ class DatabaseHelper {
     final path = join(dbPath, 'med_sales.db');
     return await openDatabase(
       path,
-      version: 4,
+      version: 5,
       onCreate: (db, version) async {
         await db.execute('''
           CREATE TABLE medicamentos(
@@ -50,6 +53,17 @@ class DatabaseHelper {
             medicamento_id INTEGER NOT NULL,
             cantidad INTEGER NOT NULL,
             precio_unitario REAL NOT NULL
+          )
+        ''');
+
+        await db.execute('''
+          CREATE TABLE finanzas(
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            tipo TEXT NOT NULL,
+            monto REAL NOT NULL,
+            descripcion TEXT NOT NULL,
+            fecha TEXT NOT NULL,
+            es_ingreso INTEGER NOT NULL
           )
         ''');
       },
@@ -89,6 +103,19 @@ class DatabaseHelper {
         if (oldVersion < 4) {
           // Migrar de versión 3 a 4: agregar campo es_mayorista a ventas
           await db.execute('ALTER TABLE ventas ADD COLUMN es_mayorista INTEGER DEFAULT 0');
+        }
+        if (oldVersion < 5) {
+          // Migrar de versión 4 a 5: agregar tabla de finanzas
+          await db.execute('''
+            CREATE TABLE finanzas(
+              id INTEGER PRIMARY KEY AUTOINCREMENT,
+              tipo TEXT NOT NULL,
+              monto REAL NOT NULL,
+              descripcion TEXT NOT NULL,
+              fecha TEXT NOT NULL,
+              es_ingreso INTEGER NOT NULL
+            )
+          ''');
         }
       },
     );
@@ -141,6 +168,118 @@ class DatabaseHelper {
       await txn.delete('ventas', where: 'id = ?', whereArgs: [ventaId]);
     });
   }
+
+  // Métodos para gestión financiera
+  Future<int> insertFinanceRecord(FinanceRecord record) async {
+    final db = await database;
+    return await db.insert('finanzas', record.toMap());
+  }
+
+  Future<List<FinanceRecord>> getFinanceRecords() async {
+    final db = await database;
+    final result = await db.query('finanzas', orderBy: 'fecha DESC');
+    return result.map((map) => FinanceRecord.fromMap(map)).toList();
+  }
+
+  Future<List<FinanceRecord>> getFinanceRecordsByType(String tipo) async {
+    final db = await database;
+    final result = await db.query(
+      'finanzas',
+      where: 'tipo = ?',
+      whereArgs: [tipo],
+      orderBy: 'fecha DESC',
+    );
+    return result.map((map) => FinanceRecord.fromMap(map)).toList();
+  }
+
+  Future<void> updateFinanceRecord(FinanceRecord record) async {
+    final db = await database;
+    await db.update(
+      'finanzas',
+      record.toMap(),
+      where: 'id = ?',
+      whereArgs: [record.id],
+    );
+  }
+
+  Future<void> deleteFinanceRecord(int id) async {
+    final db = await database;
+    await db.delete('finanzas', where: 'id = ?', whereArgs: [id]);
+  }
+
+  Future<FinanceSummary> getFinanceSummary() async {
+    final records = await getFinanceRecords();
+    return FinanceSummary.fromRecords(records);
+  }
+
+  Future<List<Drug>> getDrugs() async {
+    final db = await database;
+    final result = await db.query('medicamentos', orderBy: 'nombre');
+    return result.map((map) => Drug.fromMap(map)).toList();
+  }
+
+  Future<double> calculateInvestedAmount() async {
+    final drugs = await getDrugs();
+    return InvestmentCalculator.calculateInvestedAmount(drugs);
+  }
+
+  @override
+  Future<int> insert(String table, Map<String, dynamic> data) async {
+    final db = await database;
+    return await db.insert(table, data);
+  }
+
+  @override
+  Future<void> update(String table, Map<String, dynamic> data, String where, List<dynamic> whereArgs) async {
+    final db = await database;
+    await db.update(table, data, where: where, whereArgs: whereArgs);
+  }
+
+  @override
+  Future<void> delete(String table, String where, List<dynamic> whereArgs) async {
+    final db = await database;
+    await db.delete(table, where: where, whereArgs: whereArgs);
+  }
+
+  @override
+  Future<int> saveSale({
+    required String fecha,
+    required double total,
+    required String nombreCliente,
+    required bool esMayorista,
+    required List<Map<String, dynamic>> items,
+  }) async {
+    final db = await database;
+    late int ventaId;
+    
+    await db.transaction((txn) async {
+      // Insert sale
+      ventaId = await txn.insert('ventas', {
+        'fecha': fecha,
+        'total': total,
+        'nombre_cliente': nombreCliente,
+        'es_mayorista': esMayorista ? 1 : 0,
+      });
+
+      // Insert sale items and update stock
+      for (final item in items) {
+        await txn.insert('detalle_ventas', {
+          'venta_id': ventaId,
+          'medicamento_id': item['medicamento_id'],
+          'cantidad': item['cantidad'],
+          'precio_unitario': item['precio_unitario'],
+        });
+        
+        // Update drug stock
+        await txn.rawUpdate(
+          'UPDATE medicamentos SET cantidad = cantidad - ? WHERE id = ?',
+          [item['cantidad'], item['medicamento_id']],
+        );
+      }
+    });
+    
+    return ventaId;
+  }
 }
 
 class SaleItemWithName {
@@ -159,6 +298,15 @@ class SaleItemWithName {
     required this.precioUnitario,
     required this.nombre,
   });
+
+  Map<String, dynamic> toMap() => {
+        'id': id,
+        'venta_id': ventaId,
+        'medicamento_id': medicamentoId,
+        'cantidad': cantidad,
+        'precio_unitario': precioUnitario,
+        'nombre': nombre,
+      };
 
   static SaleItemWithName fromMap(Map<String, dynamic> m) => SaleItemWithName(
         id: m['id'] as int?,

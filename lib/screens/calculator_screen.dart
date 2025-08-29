@@ -157,7 +157,7 @@ class _CalculatorScreenState extends State<CalculatorScreen> {
     final theme = Theme.of(context);
     
     return Scaffold(
-      backgroundColor: theme.colorScheme.background,
+      backgroundColor: theme.colorScheme.surface,
       body: SafeArea(
         child: Column(
           children: [
@@ -176,7 +176,7 @@ class _CalculatorScreenState extends State<CalculatorScreen> {
                         '$_previousNumber $_operation',
                         style: TextStyle(
                           fontSize: 20,
-                          color: theme.colorScheme.onBackground.withOpacity(0.6),
+                          color: theme.colorScheme.onSurface.withOpacity(0.6),
                         ),
                       ),
                     const SizedBox(height: 8),
@@ -185,7 +185,7 @@ class _CalculatorScreenState extends State<CalculatorScreen> {
                       style: TextStyle(
                         fontSize: 48,
                         fontWeight: FontWeight.w300,
-                        color: theme.colorScheme.onBackground,
+                        color: theme.colorScheme.onSurface,
                       ),
                       maxLines: 1,
                       overflow: TextOverflow.ellipsis,

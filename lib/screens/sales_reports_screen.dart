@@ -1,8 +1,9 @@
 import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
 import '../models/sale.dart';
-import '../data/database_helper.dart';
+import '../data/database_factory.dart';
 import '../utils/pdf_generator.dart';
+import '../utils/bubble_notification.dart';
 import 'dart:io';
 import 'package:path_provider/path_provider.dart';
 import 'package:share_plus/share_plus.dart';
@@ -28,7 +29,7 @@ class _SalesReportsScreenState extends State<SalesReportsScreen> {
 
   Future<void> _loadSales() async {
     setState(() => _isLoading = true);
-    final sales = await DatabaseHelper.instance.getSales();
+    final sales = await DatabaseFactory.instance.getSales();
     setState(() {
       _sales = sales;
       _isLoading = false;
@@ -46,9 +47,7 @@ class _SalesReportsScreenState extends State<SalesReportsScreen> {
   Future<void> _exportMonthlyReport() async {
     final filteredSales = _filteredSales;
     if (filteredSales.isEmpty) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('No hay ventas en el mes seleccionado')),
-      );
+      context.showInfoBubble('No hay ventas en el mes seleccionado');
       return;
     }
 
@@ -60,7 +59,7 @@ class _SalesReportsScreenState extends State<SalesReportsScreen> {
     final salesData = <List<String>>[];
     
     for (final sale in filteredSales) {
-      final items = await DatabaseHelper.instance.getSaleItems(sale.id!);
+      final items = await DatabaseFactory.instance.getSaleItems(sale.id!);
       final itemsText = items.map((item) => '${item.nombre} (${item.cantidad})').join(', ');
       salesData.add([
         sale.id.toString(),
@@ -119,14 +118,12 @@ class _SalesReportsScreenState extends State<SalesReportsScreen> {
     await Share.shareXFiles([XFile(file.path)], text: 'Reporte mensual $_selectedMonth');
     
     if (mounted) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('Reporte exportado: ${file.path}')),
-      );
+      context.showSuccessBubble('Reporte exportado: ${file.path}');
     }
   }
 
   Future<void> _viewSaleReport(Sale sale) async {
-    final items = await DatabaseHelper.instance.getSaleItems(sale.id!);
+    final items = await DatabaseFactory.instance.getSaleItems(sale.id!);
     final dir = await getApplicationDocumentsDirectory();
     final file = File('${dir.path}/informes_ventas/informe_venta_${sale.id}.pdf');
     
@@ -179,7 +176,7 @@ class _SalesReportsScreenState extends State<SalesReportsScreen> {
 
     if (confirmed == true) {
       try {
-        await DatabaseHelper.instance.deleteSale(sale.id!);
+        await DatabaseFactory.instance.deleteSale(sale.id!);
         
         // Eliminar el archivo PDF si existe
         final dir = await getApplicationDocumentsDirectory();
@@ -192,21 +189,11 @@ class _SalesReportsScreenState extends State<SalesReportsScreen> {
         await _loadSales();
         
         if (mounted) {
-          ScaffoldMessenger.of(context).showSnackBar(
-            SnackBar(
-              content: Text('Venta #${sale.id} eliminada correctamente'),
-              backgroundColor: Colors.green,
-            ),
-          );
+          context.showSuccessBubble('Venta #${sale.id} eliminada correctamente');
         }
       } catch (e) {
         if (mounted) {
-          ScaffoldMessenger.of(context).showSnackBar(
-            SnackBar(
-              content: Text('Error al eliminar la venta: $e'),
-              backgroundColor: Colors.red,
-            ),
-          );
+          context.showErrorBubble('Error al eliminar la venta: $e');
         }
       }
     }

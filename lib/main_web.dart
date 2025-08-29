@@ -1,5 +1,5 @@
 import 'package:flutter/material.dart';
-import 'package:flutter/foundation.dart' show kIsWeb;
+import 'utils/bubble_notification.dart';
 
 void main() {
   runApp(const MedSalesWebApp());
@@ -63,16 +63,12 @@ class _WebHomePageState extends State<WebHomePage> {
 
   void _confirmSale() {
     if (_clienteController.text.trim().isEmpty) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Por favor ingrese el nombre del cliente')),
-      );
+      context.showWarningBubble('Por favor ingrese el nombre del cliente');
       return;
     }
 
     if (_cartItems.isEmpty) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('El carrito está vacío')),
-      );
+      context.showWarningBubble('El carrito está vacío');
       return;
     }
 
@@ -82,9 +78,7 @@ class _WebHomePageState extends State<WebHomePage> {
       _clienteController.clear();
     });
 
-    ScaffoldMessenger.of(context).showSnackBar(
-      const SnackBar(content: Text('Venta confirmada y guardada exitosamente')),
-    );
+    context.showSuccessBubble('Venta confirmada y guardada exitosamente');
   }
 
   Widget _buildInventoryTab() {

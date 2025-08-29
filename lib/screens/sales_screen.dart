@@ -1,10 +1,9 @@
 
 import 'package:flutter/material.dart';
-import 'package:intl/intl.dart';
-import 'package:sqflite/sqflite.dart';
-import '../data/database_helper.dart';
+import '../data/database_factory.dart';
 import '../models/drug.dart';
 import '../utils/pdf_generator.dart';
+import '../utils/bubble_notification.dart';
 
 class SalesScreen extends StatefulWidget {
   const SalesScreen({super.key});
@@ -16,6 +15,7 @@ class SalesScreen extends StatefulWidget {
 class _SalesScreenState extends State<SalesScreen> {
   List<Drug> inventory = [];
   final Map<int, int> cart = {}; // medicamentoId -> cantidad
+  final Map<int, TextEditingController> _quantityControllers = {}; // medicamentoId -> controller
   final TextEditingController _clienteController = TextEditingController();
   bool esMayorista = false; // false = minorista, true = mayorista
 
@@ -25,11 +25,34 @@ class _SalesScreenState extends State<SalesScreen> {
     _loadInventory();
   }
 
+  @override
+  void dispose() {
+    _clienteController.dispose();
+    for (final controller in _quantityControllers.values) {
+      controller.dispose();
+    }
+    super.dispose();
+  }
+
+  TextEditingController _getQuantityController(int drugId) {
+    if (!_quantityControllers.containsKey(drugId)) {
+      final quantity = cart[drugId] ?? 0;
+      _quantityControllers[drugId] = TextEditingController(text: quantity.toString());
+    }
+    return _quantityControllers[drugId]!;
+  }
+
+  void _updateQuantityController(int drugId, int newQuantity) {
+    final controller = _getQuantityController(drugId);
+    if (controller.text != newQuantity.toString()) {
+      controller.text = newQuantity.toString();
+    }
+  }
+
   Future<void> _loadInventory() async {
-    final db = await DatabaseHelper.instance.database;
-    final res = await db.query('medicamentos', orderBy: 'nombre ASC');
+    final drugs = await DatabaseFactory.instance.getDrugs();
     setState(() {
-      inventory = res.map((e) => Drug.fromMap(e)).toList();
+      inventory = drugs;
     });
   }
 
@@ -45,39 +68,39 @@ class _SalesScreenState extends State<SalesScreen> {
 
   Future<void> _confirmSale() async {
     if (cart.isEmpty) {
-      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Añade productos al carrito.')));
+      context.showWarningBubble('Añade productos al carrito.');
       return;
     }
     if (_clienteController.text.trim().isEmpty) {
-      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Ingresa el nombre del cliente.')));
+      context.showWarningBubble('Ingresa el nombre del cliente.');
       return;
     }
     
-    final db = await DatabaseHelper.instance.database;
-    await db.transaction((txn) async {
+    // Use DatabaseFactory for web-compatible database operations
+    try {
       final fecha = DateTime.now().toIso8601String();
       final totalVenta = total;
       final nombreCliente = _clienteController.text.trim();
-      final ventaId = await txn.insert('ventas', {
-        'fecha': fecha, 
-        'total': totalVenta, 
-        'nombre_cliente': nombreCliente,
-        'es_mayorista': esMayorista ? 1 : 0
-      });
-
-      // Insert items y rebajar stock
-      for (final entry in cart.entries) {
+      
+      // Prepare sale items
+      final items = cart.entries.map((entry) {
         final drug = inventory.firstWhere((d) => d.id == entry.key);
         final precioUnitario = esMayorista ? drug.precioVentaMayorista : drug.precioVentaMinorista;
-        await txn.insert('detalle_ventas', {
-          'venta_id': ventaId,
+        return {
           'medicamento_id': drug.id,
           'cantidad': entry.value,
           'precio_unitario': precioUnitario,
-        });
-        final nuevoStock = drug.cantidad - entry.value;
-        await txn.update('medicamentos', {'cantidad': nuevoStock}, where: 'id = ?', whereArgs: [drug.id]);
-      }
+          'nombre': drug.nombre,
+        };
+      }).toList();
+      
+      final ventaId = await DatabaseFactory.instance.saveSale(
+        fecha: fecha,
+        total: totalVenta,
+        nombreCliente: nombreCliente,
+        esMayorista: esMayorista,
+        items: items,
+      );
 
       // Guardar informe de venta (sin compartir PDF)
       await PdfGenerator.saveReceiptReport(
@@ -91,16 +114,25 @@ class _SalesScreenState extends State<SalesScreen> {
         }).toList(),
         total: totalVenta,
       );
-    });
+    } catch (e) {
+      if (mounted) {
+        context.showErrorBubble('Error al registrar venta: $e');
+      }
+      return;
+    }
 
     setState(() {
       cart.clear();
       _clienteController.clear();
       esMayorista = false;
+      // Limpiar todos los controladores de cantidad
+      for (final controller in _quantityControllers.values) {
+        controller.clear();
+      }
     });
     await _loadInventory();
     if (mounted) {
-      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Venta registrada e informe guardado.')));
+      context.showSuccessBubble('Venta registrada e informe guardado.');
     }
   }
 
@@ -179,43 +211,50 @@ class _SalesScreenState extends State<SalesScreen> {
                 title: Text(d.nombre),
                 subtitle: Text('Precio: \$${(esMayorista ? d.precioVentaMayorista : d.precioVentaMinorista).toStringAsFixed(2)} • Stock: ${d.cantidad}'),
                 trailing: SizedBox(
-                  width: 160,
-                  child: Row(
-                    mainAxisSize: MainAxisSize.min,
-                    children: [
-                      IconButton(
-                        icon: const Icon(Icons.remove_circle_outline),
-                        onPressed: q > 0 ? () => setState(() => cart[d.id!] = q - 1 == 0 ? 0 : q - 1) : null,
-                      ),
-                      SizedBox(
-                        width: 50,
-                        child: TextFormField(
-                          initialValue: q.toString(),
-                          textAlign: TextAlign.center,
-                          keyboardType: TextInputType.number,
-                          decoration: const InputDecoration(
-                            border: OutlineInputBorder(),
-                            contentPadding: EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-                          ),
-                          onChanged: (value) {
-                            final newQ = int.tryParse(value) ?? 0;
-                            if (newQ >= 0 && newQ <= d.cantidad) {
-                              setState(() {
-                                if (newQ == 0) {
-                                  cart.remove(d.id!);
-                                } else {
-                                  cart[d.id!] = newQ;
-                                }
-                              });
-                            }
-                          },
-                        ),
-                      ),
-                      IconButton(
-                        icon: const Icon(Icons.add_circle_outline),
-                        onPressed: d.cantidad > q ? () => setState(() => cart[d.id!] = q + 1) : null,
-                      ),
-                    ],
+                  width: 80,
+                  child: TextFormField(
+                    controller: _getQuantityController(d.id!),
+                    textAlign: TextAlign.center,
+                    keyboardType: TextInputType.number,
+                    decoration: const InputDecoration(
+                      labelText: 'Cantidad',
+                      border: OutlineInputBorder(),
+                      contentPadding: EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                    ),
+                    onChanged: (value) {
+                      final newQ = int.tryParse(value) ?? 0;
+                      if (newQ >= 0 && newQ <= d.cantidad) {
+                        setState(() {
+                          if (newQ == 0) {
+                            cart.remove(d.id!);
+                          } else {
+                            cart[d.id!] = newQ;
+                          }
+                        });
+                      } else if (value.isEmpty) {
+                        // Permitir campo vacío temporalmente
+                        setState(() {
+                          cart.remove(d.id!);
+                        });
+                      }
+                    },
+                    onEditingComplete: () {
+                      // Asegurar que el valor sea válido al terminar la edición
+                      final controller = _getQuantityController(d.id!);
+                      final newQ = int.tryParse(controller.text) ?? 0;
+                      if (newQ < 0 || newQ > d.cantidad) {
+                        final validQ = newQ < 0 ? 0 : d.cantidad;
+                        controller.text = validQ.toString();
+                        setState(() {
+                          if (validQ == 0) {
+                            cart.remove(d.id!);
+                          } else {
+                            cart[d.id!] = validQ;
+                          }
+                        });
+                      }
+                      FocusScope.of(context).unfocus();
+                    },
                   ),
                 ),
               );
@@ -225,7 +264,7 @@ class _SalesScreenState extends State<SalesScreen> {
         Container(
           padding: const EdgeInsets.all(16),
           decoration: BoxDecoration(
-            color: Theme.of(context).colorScheme.surfaceVariant,
+            color: Theme.of(context).colorScheme.surfaceContainerHighest,
             border: Border(top: BorderSide(color: Theme.of(context).dividerColor)),
           ),
           child: Row(

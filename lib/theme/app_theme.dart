@@ -17,6 +17,30 @@ class AppTheme {
   static const Color _darkSurface = Color(0xFF2A2A2A); // Gris oscuro
   static const Color _darkError = Color(0xFF8B4A47); // Rojo oscuro pastel
 
+  // Colores específicos para inventario - Tema claro
+  static const Color lightInventoryCard = Color(0xFFFFFFFF); // Blanco puro
+  static const Color lightInventoryCardShadow = Color(0x1A000000); // Sombra suave
+  static const Color lightInventoryAccent = Color(0xFF4CAF50); // Verde vibrante
+  static const Color lightInventorySecondary = Color(0xFF2196F3); // Azul vibrante
+  static const Color lightInventoryWarning = Color(0xFFFF9800); // Naranja
+  static const Color lightInventoryDanger = Color(0xFFF44336); // Rojo
+  static const Color lightInventorySuccess = Color(0xFF4CAF50); // Verde éxito
+  static const Color lightInventoryText = Color(0xFF212121); // Texto principal
+  static const Color lightInventoryTextSecondary = Color(0xFF757575); // Texto secundario
+  static const Color lightInventoryDivider = Color(0xFFE0E0E0); // Divisor
+  
+  // Colores específicos para inventario - Tema oscuro
+  static const Color darkInventoryCard = Color(0xFF2D2D2D); // Gris oscuro
+  static const Color darkInventoryCardShadow = Color(0x33000000); // Sombra más fuerte
+  static const Color darkInventoryAccent = Color(0xFF66BB6A); // Verde claro
+  static const Color darkInventorySecondary = Color(0xFF42A5F5); // Azul claro
+  static const Color darkInventoryWarning = Color(0xFFFFB74D); // Naranja claro
+  static const Color darkInventoryDanger = Color(0xFFEF5350); // Rojo claro
+  static const Color darkInventorySuccess = Color(0xFF66BB6A); // Verde éxito claro
+  static const Color darkInventoryText = Color(0xFFE0E0E0); // Texto principal claro
+  static const Color darkInventoryTextSecondary = Color(0xFFBDBDBD); // Texto secundario claro
+  static const Color darkInventoryDivider = Color(0xFF424242); // Divisor oscuro
+
   static ThemeData lightTheme = ThemeData(
     useMaterial3: true,
     brightness: Brightness.light,
@@ -41,12 +65,9 @@ class AppTheme {
       errorContainer: _lightError.withOpacity(0.3),
       onErrorContainer: const Color(0xFFD32F2F),
       
-      background: _lightBackground,
-      onBackground: const Color(0xFF2E2E2E),
-      
       surface: _lightSurface,
       onSurface: const Color(0xFF2E2E2E),
-      surfaceVariant: const Color(0xFFF0F0F0),
+      surfaceContainerHighest: const Color(0xFFF0F0F0),
       onSurfaceVariant: const Color(0xFF5E5E5E),
       
       outline: const Color(0xFFBDBDBD),
@@ -72,7 +93,7 @@ class AppTheme {
       ),
     ),
     
-    cardTheme: CardTheme(
+    cardTheme: CardThemeData(
       elevation: 2,
       shape: RoundedRectangleBorder(
         borderRadius: BorderRadius.circular(16),
@@ -103,7 +124,7 @@ class AppTheme {
       elevation: 8,
       backgroundColor: _lightSurface.withOpacity(0.9),
       indicatorColor: _lightPrimary.withOpacity(0.3),
-      labelTextStyle: MaterialStateProperty.all(
+      labelTextStyle: WidgetStateProperty.all(
         const TextStyle(
           fontSize: 12,
           fontWeight: FontWeight.w500,
@@ -158,12 +179,9 @@ class AppTheme {
       errorContainer: _darkError.withOpacity(0.3),
       onErrorContainer: const Color(0xFFFFEBEE),
       
-      background: _darkBackground,
-      onBackground: const Color(0xFFE0E0E0),
-      
       surface: _darkSurface,
       onSurface: const Color(0xFFE0E0E0),
-      surfaceVariant: const Color(0xFF3A3A3A),
+      surfaceContainerHighest: const Color(0xFF3A3A3A),
       onSurfaceVariant: const Color(0xFFB0B0B0),
       
       outline: const Color(0xFF5E5E5E),
@@ -189,7 +207,7 @@ class AppTheme {
       ),
     ),
     
-    cardTheme: CardTheme(
+    cardTheme: CardThemeData(
       elevation: 4,
       shape: RoundedRectangleBorder(
         borderRadius: BorderRadius.circular(16),
@@ -220,7 +238,7 @@ class AppTheme {
       elevation: 8,
       backgroundColor: _darkSurface.withOpacity(0.9),
       indicatorColor: _darkPrimary.withOpacity(0.3),
-      labelTextStyle: MaterialStateProperty.all(
+      labelTextStyle: WidgetStateProperty.all(
         const TextStyle(
           fontSize: 12,
           fontWeight: FontWeight.w500,
@@ -250,4 +268,49 @@ class AppTheme {
       ),
     ),
   );
+
+  static ThemeData getTheme(bool isDarkMode) {
+    return isDarkMode ? darkTheme : lightTheme;
+  }
+
+  // Métodos para acceder a colores de inventario según el tema
+  static Color getInventoryCardColor(bool isDarkMode) {
+    return isDarkMode ? darkInventoryCard : lightInventoryCard;
+  }
+
+  static Color getInventoryCardShadow(bool isDarkMode) {
+    return isDarkMode ? darkInventoryCardShadow : lightInventoryCardShadow;
+  }
+
+  static Color getInventoryAccentColor(bool isDarkMode) {
+    return isDarkMode ? darkInventoryAccent : lightInventoryAccent;
+  }
+
+  static Color getInventorySecondaryColor(bool isDarkMode) {
+    return isDarkMode ? darkInventorySecondary : lightInventorySecondary;
+  }
+
+  static Color getInventoryWarningColor(bool isDarkMode) {
+    return isDarkMode ? darkInventoryWarning : lightInventoryWarning;
+  }
+
+  static Color getInventoryDangerColor(bool isDarkMode) {
+    return isDarkMode ? darkInventoryDanger : lightInventoryDanger;
+  }
+
+  static Color getInventorySuccessColor(bool isDarkMode) {
+    return isDarkMode ? darkInventorySuccess : lightInventorySuccess;
+  }
+
+  static Color getInventoryTextColor(bool isDarkMode) {
+    return isDarkMode ? darkInventoryText : lightInventoryText;
+  }
+
+  static Color getInventoryTextSecondaryColor(bool isDarkMode) {
+    return isDarkMode ? darkInventoryTextSecondary : lightInventoryTextSecondary;
+  }
+
+  static Color getInventoryDividerColor(bool isDarkMode) {
+    return isDarkMode ? darkInventoryDivider : lightInventoryDivider;
+  }
 }
